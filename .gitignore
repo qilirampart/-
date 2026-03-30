@@ -6,6 +6,8 @@ __pycache__/
 *.pyo
 *.pyd
 *.log
+build/
+dist/
 
 output/
 memory/
@@ -15,6 +17,7 @@ memory/
 runtime/api_config.json
 runtime/tencent_asr_config.json
 runtime/downloader_config.json
+runtime/ffmpeg/
 runtime/models/
 
 .env

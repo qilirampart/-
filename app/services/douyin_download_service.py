@@ -8,13 +8,13 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from app.config.settings import PROJECT_ROOT
+from app.config.settings import DOWNLOADER_CONFIG_PATH
 from app.utils.paths import build_download_output_path
 
 ProgressCallback = Callable[[int, int], None]
 CancelCallback = Callable[[], bool]
 
-_CONFIG_PATH = PROJECT_ROOT / "runtime" / "downloader_config.json"
+_CONFIG_PATH = DOWNLOADER_CONFIG_PATH
 _DEFAULT_CONFIG = {
     "enabled": True,
     "parser_base_url": "https://douyin-vd.vercel.app/api/hello",

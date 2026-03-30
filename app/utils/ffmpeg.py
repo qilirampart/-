@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
+
+from app.config.settings import FFMPEG_DIR, RESOURCE_ROOT
 
 
 class FFmpegError(RuntimeError):
@@ -13,7 +16,7 @@ def merge_av_streams(video_path: str | Path, audio_path: str | Path, output_path
     audio = str(audio_path)
     output = str(output_path)
     command = [
-        "ffmpeg",
+        _resolve_binary("ffmpeg"),
         "-y",
         "-loglevel",
         "error",
@@ -40,7 +43,7 @@ def merge_av_streams(video_path: str | Path, audio_path: str | Path, output_path
 
 def probe_media_duration_ms(media_path: str | Path) -> int:
     command = [
-        "ffprobe",
+        _resolve_binary("ffprobe"),
         "-v",
         "error",
         "-show_entries",
@@ -59,7 +62,7 @@ def probe_media_duration_ms(media_path: str | Path) -> int:
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
-        raise FFmpegError(detail or "ffprobe 读取时长失败。")
+        raise FFmpegError(detail or "ffprobe 获取媒体时长失败。")
     try:
         return int(float((completed.stdout or "0").strip()) * 1000)
     except ValueError as exc:
@@ -77,7 +80,7 @@ def extract_audio_track(
     bitrate: str = "24k",
 ) -> None:
     command = [
-        "ffmpeg",
+        _resolve_binary("ffmpeg"),
         "-y",
         "-loglevel",
         "error",
@@ -112,3 +115,23 @@ def extract_audio_track(
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
         raise FFmpegError(detail or "ffmpeg 音频提取失败。")
+
+
+def _resolve_binary(binary_name: str) -> str:
+    executable_names = [f"{binary_name}.exe", binary_name]
+    candidate_roots = [
+        FFMPEG_DIR,
+        RESOURCE_ROOT / "runtime" / "ffmpeg",
+    ]
+    for root in candidate_roots:
+        for executable_name in executable_names:
+            candidate = root / executable_name
+            if candidate.exists():
+                return str(candidate)
+
+    system_binary = shutil.which(binary_name)
+    if system_binary:
+        return system_binary
+    raise FFmpegError(
+        "未找到 ffmpeg/ffprobe，请把可执行文件放到 runtime/ffmpeg/ 目录，或加入系统 PATH。"
+    )

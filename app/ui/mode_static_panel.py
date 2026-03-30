@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.config.settings import DEFAULT_STATIC_CANDIDATE_FRAME_COUNT
+from app.config.settings import DEFAULT_STATIC_CANDIDATE_FRAME_COUNT, IS_PACKAGED_BUILD
 from app.ui.no_wheel_combo_box import NoWheelComboBox
 
 
@@ -23,27 +23,28 @@ class ModeStaticPanel(QWidget):
         self.setObjectName("modeStaticPanel")
 
         self.selection_mode_combo = NoWheelComboBox()
-        self.selection_mode_combo.addItem("自动 + 手动补充", "hybrid")
-        self.selection_mode_combo.addItem("自动选帧", "auto")
-        self.selection_mode_combo.addItem("手动选帧", "manual")
+        self.selection_mode_combo.addItem("自动选帧 + 手动补充", "hybrid")
+        self.selection_mode_combo.addItem("仅自动选帧", "auto")
+        self.selection_mode_combo.addItem("仅手动选帧", "manual")
 
         self.ocr_engine_combo = NoWheelComboBox()
         self.ocr_engine_combo.addItem("视觉 API（云端）", "api")
-        self.ocr_engine_combo.addItem("本地 PaddleOCR", "paddle")
-        self.ocr_engine_combo.addItem("自动（本地优先）", "auto")
+        if not IS_PACKAGED_BUILD:
+            self.ocr_engine_combo.addItem("本地 PaddleOCR", "paddle")
+            self.ocr_engine_combo.addItem("自动（本地优先）", "auto")
 
         self.candidate_count_label = QLabel(str(DEFAULT_STATIC_CANDIDATE_FRAME_COUNT))
         self.candidate_count_label.setProperty("role", "inlineValue")
 
         self.enable_roi_checkbox = QCheckBox("启用手动框选 OCR 区域")
-        self.keep_screenshots_checkbox = QCheckBox("保留截图")
+        self.keep_screenshots_checkbox = QCheckBox("保留截图中间文件")
         self.keep_screenshots_checkbox.setChecked(True)
 
-        self.generate_candidates_button = QPushButton("自动生成候选帧")
+        self.generate_candidates_button = QPushButton("生成候选帧")
         self.generate_candidates_button.setProperty("role", "secondary")
         self.generate_candidates_button.setEnabled(False)
 
-        self.add_current_frame_button = QPushButton("添加当前帧")
+        self.add_current_frame_button = QPushButton("加入当前帧")
         self.add_current_frame_button.setProperty("role", "secondary")
         self.add_current_frame_button.setEnabled(False)
 
@@ -58,22 +59,22 @@ class ModeStaticPanel(QWidget):
         self.selected_frames_list.setMinimumHeight(140)
         self.selected_frames_list.setMaximumHeight(220)
 
-        options_group = QGroupBox("识别参数")
+        options_group = QGroupBox("提取设置")
         options_group.setObjectName("settingsGroup")
         options_layout = QVBoxLayout(options_group)
         options_layout.setSpacing(10)
-        options_layout.addWidget(self._build_field_block("选帧方式", self.selection_mode_combo))
+        options_layout.addWidget(self._build_field_block("选帧模式", self.selection_mode_combo))
         options_layout.addWidget(self._build_value_block("候选帧数量", self.candidate_count_label))
         options_layout.addWidget(self._build_field_block("OCR 引擎", self.ocr_engine_combo))
         options_layout.addWidget(self._build_field_block("OCR 区域", self.enable_roi_checkbox))
-        options_layout.addWidget(self._build_field_block("截图保存", self.keep_screenshots_checkbox))
+        options_layout.addWidget(self._build_field_block("截图输出", self.keep_screenshots_checkbox))
 
         candidate_group = QGroupBox("候选帧管理")
         candidate_group.setObjectName("settingsGroup")
         candidate_layout = QVBoxLayout(candidate_group)
         candidate_layout.setSpacing(10)
 
-        candidate_hint = QLabel("自动候选帧按清晰度和稳定度评分；图片素材会默认生成一张静态帧。")
+        candidate_hint = QLabel("自动选帧后可继续增删当前帧，勾选列表中的帧会参与最终提取。")
         candidate_hint.setProperty("role", "sectionNote")
         candidate_hint.setWordWrap(True)
 
@@ -119,7 +120,8 @@ class ModeStaticPanel(QWidget):
         return str(self.selection_mode_combo.currentData())
 
     def selected_ocr_mode(self) -> str:
-        return str(self.ocr_engine_combo.currentData())
+        value = self.ocr_engine_combo.currentData()
+        return str(value) if value is not None else "api"
 
     def set_source_capabilities(
         self,

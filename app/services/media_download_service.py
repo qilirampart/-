@@ -8,12 +8,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from app.config.settings import PROJECT_ROOT
+from app.config.settings import DOWNLOADER_CONFIG_PATH
 from app.services.douyin_download_service import DouyinDownloadService
 from app.utils.ffmpeg import FFmpegError, merge_av_streams
 from app.utils.paths import build_article_session_dir, build_download_output_path
 
-_CONFIG_PATH = PROJECT_ROOT / "runtime" / "downloader_config.json"
+_CONFIG_PATH = DOWNLOADER_CONFIG_PATH
 _DEFAULT_CONFIG = {
     "enabled": True,
     "parser_base_url": "https://douyin-vd.vercel.app/api/hello",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
-from app.config.settings import PROJECT_ROOT
+from app.config.settings import USER_GUIDE_PATH
 
 
 class HelpDialog(QDialog):
@@ -17,7 +17,7 @@ class HelpDialog(QDialog):
         title = QLabel("帧析使用说明")
         title.setProperty("role", "sectionTitle")
 
-        subtitle = QLabel("内置文档会随软件功能一起更新，本地 OCR 仅作为兼容能力保留，不建议作为默认方案。")
+        subtitle = QLabel("这里汇总了下载、提取、OCR、语音转写和配置相关说明。")
         subtitle.setProperty("role", "sectionSubtitle")
         subtitle.setWordWrap(True)
 
@@ -40,7 +40,6 @@ class HelpDialog(QDialog):
         layout.addWidget(close_button)
 
     def _load_markdown(self) -> str:
-        doc_path = PROJECT_ROOT / "docs" / "user-guide.md"
-        if not doc_path.exists():
+        if not USER_GUIDE_PATH.exists():
             return "说明文档不存在，请检查 docs/user-guide.md。"
-        return doc_path.read_text(encoding="utf-8")
+        return USER_GUIDE_PATH.read_text(encoding="utf-8")

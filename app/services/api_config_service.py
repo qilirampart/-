@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "runtime" / "api_config.json"
+from app.config.settings import API_CONFIG_PATH
+
+CONFIG_PATH = API_CONFIG_PATH
 MAX_API_PROVIDERS = 5
 DEFAULT_PROVIDER_TEMPLATE: dict[str, Any] = {
     "name": "默认通道",
