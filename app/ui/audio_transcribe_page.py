@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -283,13 +284,19 @@ class AudioTranscribePage(QWidget):
         result_layout.addWidget(self.result_tabs, 1)
         result_layout.addLayout(export_row)
 
+        header_scroll = QScrollArea()
+        header_scroll.setWidgetResizable(True)
+        header_scroll.setFrameShape(QFrame.NoFrame)
+        header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        header_scroll.setWidget(header_card)
+
         splitter = QSplitter(Qt.Vertical)
         splitter.setChildrenCollapsible(False)
-        splitter.addWidget(header_card)
+        splitter.addWidget(header_scroll)
         splitter.addWidget(result_card)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([320, 520])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([420, 460])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

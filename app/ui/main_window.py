@@ -33,6 +33,7 @@ from app.config.settings import (
     APP_NAME,
     OUTPUT_DIR,
     PREVIEW_RATIO_PRESETS,
+    RESOURCE_ROOT,
     SUPPORTED_IMAGE_EXTENSIONS,
     SUPPORTED_VIDEO_EXTENSIONS,
     WINDOW_MIN_HEIGHT,
@@ -845,9 +846,14 @@ class MainWindow(QMainWindow):
         return {"card": card, "value": value_label}
 
     def _load_theme(self) -> None:
-        theme_path = Path(__file__).with_name("theme.qss")
-        if theme_path.exists():
-            self.setStyleSheet(theme_path.read_text(encoding="utf-8"))
+        candidates = [
+            Path(__file__).with_name("theme.qss"),
+            RESOURCE_ROOT / "app" / "ui" / "theme.qss",
+        ]
+        for theme_path in candidates:
+            if theme_path.exists():
+                self.setStyleSheet(theme_path.read_text(encoding="utf-8"))
+                break
 
     def _set_status(self, text: str, tone: str = "idle") -> None:
         self.status_badge.setText(text)

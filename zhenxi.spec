@@ -9,6 +9,7 @@ project_root = Path.cwd()
 datas = [
     (str(project_root / "assets"), "assets"),
     (str(project_root / "docs"), "docs"),
+    (str(project_root / "app" / "ui" / "theme.qss"), "app/ui"),
 ]
 binaries = []
 hiddenimports = [
