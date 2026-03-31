@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -53,29 +54,42 @@ class DouyinDownloadService:
     ) -> DouyinDownloadResult:
         share_url = self.extract_share_url(text)
         if not share_url:
-            raise DouyinDownloadError("没有识别到抖音分享链接，请先复制包含 https:// 的分享文本。")
+            raise DouyinDownloadError("未识别到有效的抖音分享链接，请粘贴包含 https:// 的完整文本。")
 
         payload, parser_url = self._resolve_share_url(share_url, should_cancel=should_cancel)
-        video_url = self._extract_video_url(payload)
+        video_urls = self._extract_video_urls(payload)
         title = self._extract_text(payload, ("title", "desc", "aweme_id"))
         author = self._extract_text(payload, ("author", "nickname", "sec_uid"))
-        suffix = self._guess_suffix(video_url)
-        local_path = build_download_output_path(title or "douyin_video", suffix=suffix)
-        self._download_file(
-            video_url,
-            local_path,
-            progress_callback=progress_callback,
-            should_cancel=should_cancel,
-        )
 
-        return DouyinDownloadResult(
-            share_url=share_url,
-            parser_url=parser_url,
-            video_url=video_url,
-            local_path=str(local_path),
-            title=title,
-            author=author,
-        )
+        errors: list[str] = []
+        for index, video_url in enumerate(video_urls, start=1):
+            self._check_cancelled(should_cancel)
+            suffix = self._guess_suffix(video_url)
+            local_path = build_download_output_path(title or "douyin_video", suffix=suffix)
+            try:
+                self._download_file(
+                    video_url,
+                    local_path,
+                    progress_callback=progress_callback,
+                    should_cancel=should_cancel,
+                )
+                return DouyinDownloadResult(
+                    share_url=share_url,
+                    parser_url=parser_url,
+                    video_url=video_url,
+                    local_path=str(local_path),
+                    title=title,
+                    author=author,
+                )
+            except DouyinDownloadError as exc:
+                if should_cancel is not None and should_cancel():
+                    raise
+                errors.append(f"候选链接 {index}: {exc}")
+
+        detail = "；".join(errors[:3])
+        if len(errors) > 3:
+            detail += "；其余候选链接也已失败"
+        raise DouyinDownloadError(f"下载视频失败，所有候选直链均不可用。{detail}")
 
     @staticmethod
     def extract_share_url(text: str) -> str | None:
@@ -112,7 +126,7 @@ class DouyinDownloadService:
     ) -> tuple[Any, str]:
         config = self.load_config()
         if not config.get("enabled", True):
-            raise DouyinDownloadError("链接下载功能已禁用，请检查 runtime/downloader_config.json。")
+            raise DouyinDownloadError("下载能力已被禁用，请检查 runtime/downloader_config.json。")
 
         self._check_cancelled(should_cancel)
         parser_url = self._build_parser_url(str(config.get("parser_base_url", "")), share_url)
@@ -123,7 +137,7 @@ class DouyinDownloadService:
                 charset = response.headers.get_content_charset() or "utf-8"
                 body = response.read().decode(charset, errors="replace").strip()
         except Exception as exc:  # noqa: BLE001
-            raise DouyinDownloadError(f"解析抖音链接失败：{exc}") from exc
+            raise DouyinDownloadError(f"解析抖音分享链接失败: {exc}") from exc
 
         self._check_cancelled(should_cancel)
         try:
@@ -131,12 +145,12 @@ class DouyinDownloadService:
         except json.JSONDecodeError:
             if body.startswith("http://") or body.startswith("https://"):
                 return {"video_url": body}, parser_url
-            raise DouyinDownloadError("解析服务没有返回可识别的 JSON 或视频地址。")
+            raise DouyinDownloadError("解析服务返回的内容不是可用的 JSON 或视频直链。")
 
     @staticmethod
     def _build_parser_url(base_url: str, share_url: str) -> str:
         if not base_url:
-            raise DouyinDownloadError("未配置解析服务地址，请检查 runtime/downloader_config.json。")
+            raise DouyinDownloadError("解析服务地址为空，请检查 runtime/downloader_config.json。")
 
         parts = urlsplit(base_url)
         query = parse_qsl(parts.query, keep_blank_values=True)
@@ -153,38 +167,102 @@ class DouyinDownloadService:
         progress_callback: ProgressCallback | None = None,
         should_cancel: CancelCallback | None = None,
     ) -> None:
-        request = Request(source_url, headers=self._default_headers(include_referer=True))
         timeout = float(self.load_config().get("timeout_seconds", 45))
+        last_error: Exception | None = None
 
-        try:
-            with urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
-                total = int(response.headers.get("Content-Length") or 0)
-                downloaded = 0
-                while True:
-                    self._check_cancelled(should_cancel)
-                    chunk = response.read(1024 * 128)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_callback is not None:
-                        progress_callback(downloaded, total)
-        except Exception as exc:  # noqa: BLE001
-            if target_path.exists():
-                target_path.unlink(missing_ok=True)
-            raise DouyinDownloadError(f"下载视频失败：{exc}") from exc
+        for headers in self._download_header_variants(source_url):
+            self._check_cancelled(should_cancel)
+            request = Request(source_url, headers=headers)
+            try:
+                with urlopen(request, timeout=timeout) as response, open(target_path, "wb") as handle:
+                    total = int(response.headers.get("Content-Length") or 0)
+                    downloaded = 0
+                    while True:
+                        self._check_cancelled(should_cancel)
+                        chunk = response.read(1024 * 128)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback is not None:
+                            progress_callback(downloaded, total)
+                return
+            except HTTPError as exc:
+                last_error = exc
+                if target_path.exists():
+                    target_path.unlink(missing_ok=True)
+                if exc.code not in {401, 403, 429}:
+                    break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if target_path.exists():
+                    target_path.unlink(missing_ok=True)
 
-    def _default_headers(self, include_referer: bool = False) -> dict[str, str]:
+        if target_path.exists():
+            target_path.unlink(missing_ok=True)
+
+        if isinstance(last_error, HTTPError):
+            raise DouyinDownloadError(f"直链请求被拒绝，HTTP {last_error.code}") from last_error
+        if last_error is not None:
+            raise DouyinDownloadError(f"下载直链失败: {last_error}") from last_error
+        raise DouyinDownloadError("下载直链失败，未获取到可用响应。")
+
+    def _default_headers(self) -> dict[str, str]:
         config = self.load_config()
-        headers = {
+        return {
             "User-Agent": str(config.get("user_agent", _DEFAULT_CONFIG["user_agent"])),
-            "Accept": "application/json,text/plain,*/*",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Connection": "keep-alive",
         }
-        if include_referer:
-            headers["Referer"] = "https://www.douyin.com/"
-        return headers
 
-    def _extract_video_url(self, payload: Any) -> str:
+    def _download_header_variants(self, source_url: str) -> list[dict[str, str]]:
+        host = urlsplit(source_url).netloc
+        base = self._default_headers()
+        variants = [
+            {
+                **base,
+                "Referer": "https://www.douyin.com/",
+                "Origin": "https://www.douyin.com",
+            },
+            {
+                **base,
+                "Referer": "https://www.douyin.com/",
+                "Origin": "https://www.douyin.com",
+                "Range": "bytes=0-",
+            },
+            {
+                **base,
+                "Referer": "https://www.douyin.com/",
+                "Origin": "https://www.douyin.com",
+                "Range": "bytes=0-",
+                "Host": host,
+            },
+            {
+                **base,
+                "Range": "bytes=0-",
+                "Host": host,
+            },
+            {
+                **base,
+                "Host": host,
+            },
+            base,
+        ]
+
+        unique_variants: list[dict[str, str]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for headers in variants:
+            marker = tuple(sorted(headers.items()))
+            if marker in seen:
+                continue
+            seen.add(marker)
+            unique_variants.append(headers)
+        return unique_variants
+
+    def _extract_video_urls(self, payload: Any) -> list[str]:
         candidates: list[tuple[int, str]] = []
         for key_path, value in self._walk(payload):
             if not isinstance(value, str):
@@ -197,10 +275,17 @@ class DouyinDownloadService:
                 candidates.append((score, url))
 
         if not candidates:
-            raise DouyinDownloadError("解析结果里没有找到可下载的视频地址。")
+            raise DouyinDownloadError("解析结果中没有找到可用的视频直链。")
 
         candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
+        ordered_urls: list[str] = []
+        seen: set[str] = set()
+        for _, url in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            ordered_urls.append(url)
+        return ordered_urls
 
     def _extract_text(self, payload: Any, preferred_keys: tuple[str, ...]) -> str | None:
         for key_path, value in self._walk(payload):
@@ -224,11 +309,11 @@ class DouyinDownloadService:
         score = 0
         if "video" in lowered_path:
             score += 30
-        if any(token in lowered_path for token in ("nwm", "no_water", "nowater", "play")):
+        if any(token in lowered_path for token in ("nwm", "no_water", "nowater", "play", "play_addr", "url_list")):
             score += 25
         if lowered_url.endswith(".mp4"):
             score += 20
-        if "video" in lowered_url:
+        if any(token in lowered_url for token in ("video", "play", "aweme")):
             score += 10
         if "watermark" in lowered_url:
             score -= 10
@@ -259,4 +344,4 @@ class DouyinDownloadService:
     @staticmethod
     def _check_cancelled(should_cancel: CancelCallback | None) -> None:
         if should_cancel is not None and should_cancel():
-            raise DouyinDownloadError("下载已取消")
+            raise DouyinDownloadError("下载已取消。")

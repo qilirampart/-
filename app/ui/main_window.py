@@ -858,7 +858,7 @@ class MainWindow(QMainWindow):
 
     def _open_api_config_dialog(self) -> None:
         dialog = APIConfigDialog(self)
-        if dialog.exec() != dialog.Accepted:
+        if not dialog.exec():
             return
 
         saved_config = dialog.saved_config or {}

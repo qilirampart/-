@@ -327,7 +327,7 @@ class AudioTranscribePage(QWidget):
 
     def _open_config_dialog(self) -> None:
         dialog = AudioASRConfigDialog(self)
-        if dialog.exec() != dialog.Accepted:
+        if not dialog.exec():
             return
         self._refresh_config_summary()
         self._append_status("音频 API 配置已更新。")
