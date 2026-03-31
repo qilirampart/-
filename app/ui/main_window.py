@@ -384,7 +384,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._build_controls_card_v2())
         splitter.setStretchFactor(0, 9)
         splitter.setStretchFactor(1, 3)
-        splitter.setSizes([1160, 360])
+        splitter.setSizes([1240, 340])
 
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -691,13 +691,12 @@ class MainWindow(QMainWindow):
     def _build_preview_workspace_v3(self) -> QFrame:
         card = QFrame()
         card.setObjectName("previewCard")
-        card.setMinimumHeight(720)
 
         title = QLabel("视频预览")
         title.setProperty("role", "sectionTitle")
 
         self.video_preview = VideoPreviewWidget()
-        self.video_preview.setMinimumHeight(760)
+        self.video_preview.setMinimumHeight(360)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -709,8 +708,8 @@ class MainWindow(QMainWindow):
     def _build_controls_card_v2(self) -> QFrame:
         card = QFrame()
         card.setObjectName("controlsCard")
-        card.setMinimumWidth(340)
-        card.setMaximumWidth(420)
+        card.setMinimumWidth(320)
+        card.setMaximumWidth(400)
 
         title = QLabel("提取控制")
         title.setProperty("role", "sectionTitle")
@@ -751,6 +750,8 @@ class MainWindow(QMainWindow):
         preview_layout = QGridLayout(preview_group)
         preview_layout.setHorizontalSpacing(10)
         preview_layout.setVerticalSpacing(10)
+        preview_layout.setColumnStretch(0, 0)
+        preview_layout.setColumnStretch(1, 1)
         preview_layout.addWidget(ratio_label, 0, 0)
         preview_layout.addWidget(self.preview_ratio_combo, 0, 1)
         preview_layout.addWidget(zoom_label, 1, 0)
@@ -787,6 +788,7 @@ class MainWindow(QMainWindow):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setMinimumHeight(280)
         scroll_area.setWidget(scroll_content)
 
         actions = QHBoxLayout()

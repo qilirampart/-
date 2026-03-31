@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -140,10 +142,13 @@ class AudioTranscribePage(QWidget):
 
         self.source_value = QLabel("尚未选择语音素材")
         self.source_value.setProperty("role", "inlineValue")
+        self.source_value.setWordWrap(True)
         self.audio_value = QLabel("尚未分离音频")
         self.audio_value.setProperty("role", "secondaryText")
+        self.audio_value.setWordWrap(True)
         self.config_value = QLabel()
         self.config_value.setProperty("role", "secondaryText")
+        self.config_value.setWordWrap(True)
 
         self.use_current_button = QPushButton("使用当前视频")
         self.use_current_button.setProperty("role", "secondary")
@@ -181,13 +186,14 @@ class AudioTranscribePage(QWidget):
         self.progress_label.setProperty("role", "sectionNote")
         self.progress_label.setWordWrap(True)
 
-        source_buttons = QHBoxLayout()
-        source_buttons.setSpacing(10)
-        source_buttons.addWidget(self.use_current_button)
-        source_buttons.addWidget(self.choose_video_button)
-        source_buttons.addWidget(self.choose_audio_button)
-        source_buttons.addWidget(self.config_button)
-        source_buttons.addStretch(1)
+        source_buttons = QGridLayout()
+        source_buttons.setHorizontalSpacing(10)
+        source_buttons.setVerticalSpacing(10)
+        source_buttons.addWidget(self.use_current_button, 0, 0)
+        source_buttons.addWidget(self.choose_video_button, 0, 1)
+        source_buttons.addWidget(self.choose_audio_button, 0, 2)
+        source_buttons.addWidget(self.config_button, 0, 3)
+        source_buttons.setColumnStretch(4, 1)
 
         action_buttons = QHBoxLayout()
         action_buttons.setSpacing(10)
@@ -196,14 +202,31 @@ class AudioTranscribePage(QWidget):
         action_buttons.addWidget(self.cancel_button)
         action_buttons.addStretch(1)
 
+        info_grid = QGridLayout()
+        info_grid.setHorizontalSpacing(12)
+        info_grid.setVerticalSpacing(8)
+
+        source_label = QLabel("当前语音素材")
+        source_label.setProperty("role", "fieldLabel")
+        audio_label = QLabel("音频分离")
+        audio_label.setProperty("role", "fieldLabel")
+        config_label = QLabel("当前配置")
+        config_label.setProperty("role", "fieldLabel")
+
+        info_grid.addWidget(source_label, 0, 0, Qt.AlignTop)
+        info_grid.addWidget(self.source_value, 0, 1)
+        info_grid.addWidget(audio_label, 1, 0, Qt.AlignTop)
+        info_grid.addWidget(self.audio_value, 1, 1)
+        info_grid.addWidget(config_label, 2, 0, Qt.AlignTop)
+        info_grid.addWidget(self.config_value, 2, 1)
+        info_grid.setColumnStretch(1, 1)
+
         header_layout = QVBoxLayout(header_card)
         header_layout.setContentsMargins(20, 20, 20, 20)
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(10)
         header_layout.addWidget(title)
         header_layout.addWidget(subtitle)
-        header_layout.addWidget(self.source_value)
-        header_layout.addWidget(self.audio_value)
-        header_layout.addWidget(self.config_value)
+        header_layout.addLayout(info_grid)
         header_layout.addLayout(source_buttons)
         header_layout.addLayout(action_buttons)
         header_layout.addWidget(self.progress_bar)
@@ -260,11 +283,18 @@ class AudioTranscribePage(QWidget):
         result_layout.addWidget(self.result_tabs, 1)
         result_layout.addLayout(export_row)
 
+        splitter = QSplitter(Qt.Vertical)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(header_card)
+        splitter.addWidget(result_card)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 520])
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
-        layout.addWidget(header_card)
-        layout.addWidget(result_card, 1)
+        layout.addWidget(splitter, 1)
 
     def _choose_video(self) -> None:
         filters = "视频文件 (" + " ".join(f"*{ext}" for ext in sorted(SUPPORTED_VIDEO_EXTENSIONS)) + ")"
