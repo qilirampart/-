@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+
 import requests
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from app.config.settings import DOWNLOADER_CONFIG_PATH
 from app.utils.paths import build_download_output_path
@@ -28,6 +26,7 @@ _DEFAULT_CONFIG = {
     ),
 }
 _URL_PATTERN = re.compile(r"https?://[^\s]+", re.IGNORECASE)
+_AWEME_ID_PATTERN = re.compile(r"/video/(\d+)")
 
 
 class DouyinDownloadError(RuntimeError):
@@ -130,28 +129,117 @@ class DouyinDownloadService:
         if not config.get("enabled", True):
             raise DouyinDownloadError("下载能力已被禁用，请检查 runtime/downloader_config.json。")
 
+        builtin_errors: list[str] = []
         self._check_cancelled(should_cancel)
-        parser_url = self._build_parser_url(str(config.get("parser_base_url", "")), share_url)
-
         try:
-            response = self._session().get(
-                parser_url,
-                headers=self._default_headers(),
-                timeout=float(config.get("timeout_seconds", 45)),
-                allow_redirects=True,
-            )
-            response.raise_for_status()
-            body = response.text.strip()
+            payload = self._resolve_share_url_locally(share_url, should_cancel=should_cancel)
+            return payload, "builtin://douyin-share-page"
         except Exception as exc:  # noqa: BLE001
-            raise DouyinDownloadError(f"解析抖音分享链接失败: {exc}") from exc
+            builtin_errors.append(str(exc))
+
+        parser_base_url = str(config.get("parser_base_url", "")).strip()
+        if parser_base_url:
+            try:
+                payload, parser_url = self._resolve_share_url_via_service(
+                    share_url,
+                    parser_base_url=parser_base_url,
+                    should_cancel=should_cancel,
+                )
+                return payload, parser_url
+            except Exception as exc:  # noqa: BLE001
+                builtin_errors.append(str(exc))
+
+        raise DouyinDownloadError("解析抖音分享链接失败: " + "；".join(builtin_errors))
+
+    def _resolve_share_url_locally(
+        self,
+        share_url: str,
+        should_cancel: CancelCallback | None = None,
+    ) -> dict[str, Any]:
+        self._check_cancelled(should_cancel)
+        expanded_url = self._expand_short_link(share_url)
+        aweme_id = self._extract_aweme_id(expanded_url)
+        if not aweme_id:
+            raise DouyinDownloadError("本地解析未能从短链跳转结果中识别作品 ID。")
 
         self._check_cancelled(should_cancel)
+        share_page_url = f"https://www.iesdouyin.com/share/video/{aweme_id}/"
+        response = self._session().get(
+            share_page_url,
+            headers=self._mobile_headers(),
+            timeout=float(self.load_config().get("timeout_seconds", 45)),
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        html = response.text
+
+        video_id = self._extract_json_string(html, "uri", anchor="play_addr")
+        if not video_id:
+            video_id = self._extract_json_string(html, "uri", anchor="play_api")
+        if not video_id:
+            raise DouyinDownloadError("本地解析未能从分享页中提取视频 ID。")
+
+        title = self._extract_json_string(html, "desc")
+        author = self._extract_json_string(html, "nickname")
+        url_list = self._extract_url_list_after_anchor(html, "play_addr")
+        download_url = self._extract_json_string(html, "download_url")
+
+        candidates: list[str] = []
+        candidates.append(f"https://www.iesdouyin.com/aweme/v1/play/?video_id={quote(video_id)}&ratio=1080p&line=0")
+        candidates.append(f"https://www.iesdouyin.com/aweme/v1/play/?video_id={quote(video_id)}&ratio=720p&line=0")
+
+        for url in url_list:
+            candidates.append(url.replace("/playwm/", "/play/"))
+            candidates.append(url)
+
+        if download_url:
+            candidates.append(download_url)
+
+        unique_candidates: list[str] = []
+        seen: set[str] = set()
+        for url in candidates:
+            if not url or not url.startswith(("http://", "https://")):
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            unique_candidates.append(url)
+
+        return {
+            "aweme_id": aweme_id,
+            "title": title,
+            "author": author,
+            "video_id": video_id,
+            "video_url": unique_candidates[0] if unique_candidates else "",
+            "play_urls": unique_candidates,
+            "share_page_url": share_page_url,
+            "expanded_share_url": expanded_url,
+        }
+
+    def _resolve_share_url_via_service(
+        self,
+        share_url: str,
+        *,
+        parser_base_url: str,
+        should_cancel: CancelCallback | None = None,
+    ) -> tuple[Any, str]:
+        self._check_cancelled(should_cancel)
+        parser_url = self._build_parser_url(parser_base_url, share_url)
+        response = self._session().get(
+            parser_url,
+            headers=self._default_headers(),
+            timeout=float(self.load_config().get("timeout_seconds", 45)),
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        body = response.text.strip()
+
         try:
             return json.loads(body), parser_url
         except json.JSONDecodeError:
-            if body.startswith("http://") or body.startswith("https://"):
+            if body.startswith(("http://", "https://")):
                 return {"video_url": body}, parser_url
-            raise DouyinDownloadError("解析服务返回的内容不是可用的 JSON 或视频直链。")
+            raise DouyinDownloadError("外部解析服务返回的内容不是可用的 JSON 或视频直链。")
 
     @staticmethod
     def _build_parser_url(base_url: str, share_url: str) -> str:
@@ -165,6 +253,21 @@ class DouyinDownloadService:
         query.append(("data", ""))
         rebuilt_query = urlencode(query, doseq=True)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, rebuilt_query, parts.fragment))
+
+    def _expand_short_link(self, share_url: str) -> str:
+        response = self._session().get(
+            share_url,
+            headers=self._default_headers(),
+            timeout=float(self.load_config().get("timeout_seconds", 45)),
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        return response.url
+
+    @staticmethod
+    def _extract_aweme_id(expanded_url: str) -> str | None:
+        match = _AWEME_ID_PATTERN.search(expanded_url)
+        return match.group(1) if match else None
 
     def _download_file(
         self,
@@ -220,21 +323,6 @@ class DouyinDownloadService:
             raise DouyinDownloadError(f"下载直链失败: {last_error}") from last_error
         raise DouyinDownloadError("下载直链失败，未获取到可用响应。")
 
-    @staticmethod
-    def _session() -> requests.Session:
-        session = requests.Session()
-        session.trust_env = False
-        return session
-
-    @staticmethod
-    def _open_url(request: Request, *, timeout: float):
-        try:
-            return urlopen(request, timeout=timeout)
-        except (URLError, OSError) as exc:
-            if not DouyinDownloadService._should_retry_without_proxy(exc):
-                raise
-            return DouyinDownloadService._open_url_without_proxy(request, timeout=timeout)
-
     def _default_headers(self) -> dict[str, str]:
         config = self.load_config()
         return {
@@ -244,6 +332,20 @@ class DouyinDownloadService:
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "Connection": "keep-alive",
+        }
+
+    def _mobile_headers(self) -> dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
+                "Mobile/15E148 Safari/604.1"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Referer": "https://www.douyin.com/",
         }
 
     def _download_header_variants(self, source_url: str) -> list[dict[str, str]]:
@@ -296,7 +398,7 @@ class DouyinDownloadService:
             if not isinstance(value, str):
                 continue
             url = value.strip()
-            if not (url.startswith("http://") or url.startswith("https://")):
+            if not url.startswith(("http://", "https://")):
                 continue
             score = self._score_candidate(key_path, url)
             if score > 0:
@@ -343,7 +445,7 @@ class DouyinDownloadService:
             score += 20
         if any(token in lowered_url for token in ("video", "play", "aweme")):
             score += 10
-        if "watermark" in lowered_url:
+        if "watermark" in lowered_url or "playwm" in lowered_url:
             score -= 10
         return score
 
@@ -370,36 +472,48 @@ class DouyinDownloadService:
         return ".mp4"
 
     @staticmethod
+    def _decode_js_string(value: str) -> str:
+        try:
+            return json.loads(f'"{value}"')
+        except Exception:  # noqa: BLE001
+            return value.replace("\\/", "/").replace("\\u002F", "/")
+
+    def _extract_json_string(self, text: str, key: str, *, anchor: str | None = None) -> str | None:
+        search_text = text
+        if anchor:
+            anchor_index = text.find(anchor)
+            if anchor_index != -1:
+                search_text = text[anchor_index : anchor_index + 6000]
+        pattern = rf'"{re.escape(key)}":"((?:\\.|[^"\\])*)"'
+        match = re.search(pattern, search_text)
+        if not match:
+            return None
+        value = self._decode_js_string(match.group(1)).strip()
+        return value or None
+
+    def _extract_url_list_after_anchor(self, text: str, anchor: str) -> list[str]:
+        anchor_index = text.find(anchor)
+        if anchor_index == -1:
+            return []
+        search_text = text[anchor_index : anchor_index + 12000]
+        match = re.search(r'"url_list":\[(.*?)\]', search_text, re.S)
+        if not match:
+            return []
+
+        urls: list[str] = []
+        for raw in re.findall(r'"((?:\\.|[^"\\])*)"', match.group(1)):
+            url = self._decode_js_string(raw).strip()
+            if url.startswith(("http://", "https://")):
+                urls.append(url)
+        return urls
+
+    @staticmethod
     def _check_cancelled(should_cancel: CancelCallback | None) -> None:
         if should_cancel is not None and should_cancel():
             raise DouyinDownloadError("下载已取消。")
 
     @staticmethod
-    def _should_retry_without_proxy(exc: BaseException) -> bool:
-        return isinstance(exc, (URLError, OSError))
-
-    @staticmethod
-    def _open_url_without_proxy(request: Request, *, timeout: float):
-        proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
-        previous = {key: os.environ.pop(key, None) for key in proxy_keys}
-        previous_no_proxy = os.environ.get("NO_PROXY")
-        previous_no_proxy_lower = os.environ.get("no_proxy")
-        os.environ["NO_PROXY"] = "*"
-        os.environ["no_proxy"] = "*"
-        try:
-            opener = build_opener(ProxyHandler({}))
-            return opener.open(request, timeout=timeout)
-        finally:
-            for key, value in previous.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-            if previous_no_proxy is None:
-                os.environ.pop("NO_PROXY", None)
-            else:
-                os.environ["NO_PROXY"] = previous_no_proxy
-            if previous_no_proxy_lower is None:
-                os.environ.pop("no_proxy", None)
-            else:
-                os.environ["no_proxy"] = previous_no_proxy_lower
+    def _session() -> requests.Session:
+        session = requests.Session()
+        session.trust_env = False
+        return session
