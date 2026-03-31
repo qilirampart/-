@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-macos-intel:
-    runs-on: macos-13
+  build-macos:
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
@@ -33,13 +33,13 @@ jobs:
       - name: Upload app bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zhenxi-macos-intel-app
+          name: zhenxi-macos-app
           path: dist/zhenxi.app
           if-no-files-found: error
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zhenxi-macos-intel-zip
+          name: zhenxi-macos-zip
           path: dist/zhenxi-macos-app.zip
           if-no-files-found: error

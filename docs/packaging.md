@@ -36,10 +36,10 @@ chmod +x ./build_macos.sh
 - 点击 `Run workflow`
 - 等待构建完成后下载产物
 
-当前工作流先生成一份 `macOS Intel` 版本，文件名为：
+当前工作流会生成一份 GitHub macOS runner 对应的版本，文件名为：
 
-- `zhenxi-macos-intel-app`
-- `zhenxi-macos-intel-zip`
+- `zhenxi-macos-app`
+- `zhenxi-macos-zip`
 
 ## 包内结构
 
